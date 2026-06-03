@@ -150,11 +150,11 @@ Risk Score = 40% × Volatility
 | Test Pool ID (tWETH/tUSDC) | `0xab93ee9c614b5f8355e9cb8c2379613e09a5411be72622ce4ad757620c6d3f4f` |
 | TestRouter | `0x6067c0ed54A28AD7ff1434AA4f5D0eA91Ea878De` |
 
-### Reactive Network — Lasna Testnet (Chain ID: 5318007) — Deployed 2026-05-26
+### Reactive Network — Lasna Testnet (Chain ID: 5318007) — Deployed 2026-06-03
 
 | Contract | Address |
 |---|---|
-| HedgeFlowReactive | `0xabE58d409fE97863356059469E9aF9c4DFaD8BF4` |
+| HedgeFlowReactive | `0x2e9e978149b3aa1704fA39c26b4adE29fcD8B82D` |
 
 > **Note:** HedgeFlow uses `DYNAMIC_FEE_FLAG`. Uniswap's default swap interface will not route through this pool — swaps must go through the protocol's custom router or a direct integration.
 
