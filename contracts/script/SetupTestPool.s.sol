@@ -34,8 +34,8 @@ contract SetupTestPool is Script {
     // ─── Deployed contracts ────────────────────────────────────────────────────
 
     address constant POOL_MANAGER   = 0x00B036B58a818B1BC34d502D3fE730Db729e62AC;
-    address constant HEDGEFLOW_HOOK = 0x093D70C6D2A7D8BC96e428Ad3A2362aF787549C1;
-    address constant ORACLE_MANAGER = 0xC8b62a2F4A7B3E1dc8c3DC052d67428df1b5F1c2;
+    address constant HEDGEFLOW_HOOK = 0x3A3d97eBC316426B0f94DF5fD22352EA3Cf489C1;
+    address constant ORACLE_MANAGER = 0x7F084b3245b1FCFC44B2f55c2a2047ae33e9d5a8;
 
     // sqrtPriceX96 for a 1:1 price ratio = sqrt(1) * 2^96
     uint160 constant SQRT_PRICE_1_1 = 79228162514264337593543950336;

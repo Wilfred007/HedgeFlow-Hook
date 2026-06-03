@@ -135,18 +135,20 @@ Risk Score = 40% × Volatility
 
 ## Deployed Addresses
 
-### Unichain Sepolia (Chain ID: 1301) — Deployed 2026-05-24
+### Unichain Sepolia (Chain ID: 1301) — Deployed 2026-06-03
 
 | Contract | Address |
 |---|---|
-| HedgeFlowHook | `0x093D70C6D2A7D8BC96e428Ad3A2362aF787549C1` |
-| RiskManager | `0x57ADf72f1f43C18D3c11dCE2C107d49b9083eEB4` |
-| ReserveVault | `0xA046d4bDb3CDc4ba92cA0939b1464aE1cAb6B025` |
-| OracleManager | `0xC8b62a2F4A7B3E1dc8c3DC052d67428df1b5F1c2` |
-| FeeRouter | `0xf3c832A9E35762bc9Fd270D5399EC1FeF5D40273` |
-| ILCalculator | `0x7E62b9Ab00952e5B19b5018703e68FeB665D4E9b` |
-| EmergencyController | `0x5434080F1AB9e78b9DAD5cf77e077c5E766F8A78` |
+| HedgeFlowHook | `0x3A3d97eBC316426B0f94DF5fD22352EA3Cf489C1` |
+| RiskManager | `0x8d4ed7b20d9d7344994448872d46Cb687d9995bd` |
+| ReserveVault | `0xd56f8DBbd3376c6c72383245c76933FA2e9B0fBd` |
+| OracleManager | `0x7F084b3245b1FCFC44B2f55c2a2047ae33e9d5a8` |
+| FeeRouter | `0xDddB586f219291d28aEf584Ea867f28C7BE1c49B` |
+| ILCalculator | `0xd29EEf8790Db194c670C6998e180CEce204DCd41` |
+| EmergencyController | `0xD46f2e8f6778bC842ac081Ce6CC96037Fc825052` |
 | Uniswap v4 PoolManager | `0x00B036B58a818B1BC34d502D3fE730Db729e62AC` |
+| Test Pool ID (tWETH/tUSDC) | `0xab93ee9c614b5f8355e9cb8c2379613e09a5411be72622ce4ad757620c6d3f4f` |
+| TestRouter | `0x6067c0ed54A28AD7ff1434AA4f5D0eA91Ea878De` |
 
 ### Reactive Network — Lasna Testnet (Chain ID: 5318007) — Deployed 2026-05-26
 
