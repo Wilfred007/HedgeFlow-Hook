@@ -1,0 +1,102 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: hedgeflow
+      POSTGRES_PASSWORD: hedgeflow
+      POSTGRES_DB: hedgeflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hedgeflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Risk Engine (Python/FastAPI) ────────────────────────────────────────────
+  risk-engine:
+    build:
+      context: ./backend/risk-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - HedgeFlow_API_KEY=${HedgeFlow_API_KEY:-}
+      - HedgeFlow_API_URL=${HedgeFlow_API_URL:-https://api.x.ai/v1}
+      - DATABASE_URL=postgresql://hedgeflow:hedgeflow@postgres:5432/hedgeflow
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Indexer (Node.js) ───────────────────────────────────────────────────────
+  indexer:
+    build:
+      context: ./backend
+      dockerfile: indexer/Dockerfile
+    environment:
+      - RPC_URL=${RPC_URL}
+      - CHAIN_ID=${CHAIN_ID:-84532}
+      - START_BLOCK=${START_BLOCK:-0}
+      - HEDGEFLOW_HOOK=${HEDGEFLOW_HOOK}
+      - RISK_MANAGER=${RISK_MANAGER}
+      - RESERVE_VAULT=${RESERVE_VAULT}
+      - POOL_MANAGER_ADDRESS=${POOL_MANAGER_ADDRESS}
+      - DATABASE_URL=postgresql://hedgeflow:hedgeflow@postgres:5432/hedgeflow
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Automation (Node.js) ────────────────────────────────────────────────────
+  automation:
+    build:
+      context: ./backend
+      dockerfile: automation/Dockerfile
+    environment:
+      - RPC_URL=${RPC_URL}
+      - RISK_MANAGER=${RISK_MANAGER}
+      - AUTOMATION_PRIVATE_KEY=${AUTOMATION_PRIVATE_KEY}
+      - AUTOMATION_INTERVAL_MS=${AUTOMATION_INTERVAL_MS:-60000}
+      - RISK_ENGINE_URL=http://risk-engine:8000
+      - API_URL=http://api:3001
+      - DEMO_POOL_ID=${DEMO_POOL_ID}
+      - DATABASE_URL=postgresql://hedgeflow:hedgeflow@postgres:5432/hedgeflow
+    depends_on:
+      - risk-engine
+      - api
+
+  # ── API (Node.js/Express) ───────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - DATABASE_URL=postgresql://hedgeflow:hedgeflow@postgres:5432/hedgeflow
+      - API_PORT=3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

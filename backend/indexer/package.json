@@ -1,0 +1,25 @@
+{
+  "name": "@hedgeflow/indexer",
+  "version": "1.0.0",
+  "description": "HedgeFlow on-chain event indexer",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "backfill": "ts-node src/backfill-swap-amounts.ts"
+  },
+  "dependencies": {
+    "@hedgeflow/shared": "*",
+    "ethers": "^6.13.4",
+    "pg": "^8.12.0",
+    "ioredis": "^5.4.1",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "ts-node": "^10.9.2"
+  }
+}

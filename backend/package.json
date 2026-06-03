@@ -1,0 +1,21 @@
+{
+  "name": "hedgeflow-backend",
+  "version": "1.0.0",
+  "description": "HedgeFlow backend: indexer, automation, and API",
+  "private": true,
+  "workspaces": [
+    "indexer",
+    "automation",
+    "api",
+    "shared"
+  ],
+  "scripts": {
+    "indexer": "npm run start --workspace=indexer",
+    "automation": "npm run start --workspace=automation",
+    "api": "npm run start --workspace=api",
+    "dev": "concurrently \"npm run indexer\" \"npm run automation\" \"npm run api\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
