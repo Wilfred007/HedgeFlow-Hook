@@ -11,7 +11,7 @@
 import axios from 'axios';
 import { ethers } from 'ethers';
 import { Pool as PgPool } from 'pg';
-import { config, RISK_MANAGER_ABI } from '@hedgeflow/shared';
+import { config, RISK_MANAGER_ABI, ORACLE_MANAGER_ABI } from '@hedgeflow/shared';
 
 // ─── Types (snake_case — matching FastAPI response) ───────────────────────────
 
@@ -41,8 +41,12 @@ interface PoolAnalytics {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const API_URL   = process.env.API_URL   ?? 'http://localhost:3001';
-const POOL_ID   = process.env.DEMO_POOL_ID ?? '';
+const API_URL   = process.env.API_URL        ?? 'http://localhost:3001';
+const POOL_ID   = process.env.DEMO_POOL_ID   ?? '';
+const TOKEN0    = process.env.TOKEN0         ?? '';
+const TOKEN1    = process.env.TOKEN1         ?? '';
+// Fixed 1 USD price in 18-decimal wei — sufficient for testnet oracle
+const PRICE_1E18 = ethers.parseUnits('1', 18);
 
 const RISK_MODE_TO_UINT: Record<string, number> = {
   NORMAL: 0, ELEVATED: 1, DEFENSIVE: 2, CRISIS: 3,
@@ -55,7 +59,7 @@ const UINT_TO_MODE: Record<number, string> = {
 
 let lastOnChainMode: string | null = null;
 let consecutiveErrors = 0;
-const MAX_ERRORS = 5;
+const MAX_ERRORS = 20;
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -74,13 +78,16 @@ async function main() {
 
   const db = new PgPool({ connectionString: config.databaseUrl });
 
-  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
-  const wallet   = new ethers.Wallet(config.automationPrivateKey, provider);
-  const riskMgr  = new ethers.Contract(
+  const provider   = new ethers.JsonRpcProvider(config.rpcUrl);
+  const wallet     = new ethers.Wallet(config.automationPrivateKey, provider);
+  const riskMgr    = new ethers.Contract(
     config.riskManager,
     RISK_MANAGER_ABI as unknown as string[],
     wallet
   );
+  const oracleMgr  = config.oracleManager
+    ? new ethers.Contract(config.oracleManager, ORACLE_MANAGER_ABI as unknown as string[], wallet)
+    : null;
 
   console.log(`[Automation] Wallet: ${wallet.address}`);
 
@@ -94,7 +101,7 @@ async function main() {
 
   while (true) {
     try {
-      await tick(riskMgr, db);
+      await tick(riskMgr, oracleMgr, db);
       consecutiveErrors = 0;
     } catch (err) {
       consecutiveErrors++;
@@ -110,7 +117,21 @@ async function main() {
 
 // ─── Tick ─────────────────────────────────────────────────────────────────────
 
-async function tick(riskMgr: ethers.Contract, db: PgPool): Promise<void> {
+async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null, db: PgPool): Promise<void> {
+  // 0. Refresh oracle prices so the hook can record LP positions (sequential to avoid nonce collision)
+  if (oracleMgr && TOKEN0 && TOKEN1) {
+    try {
+      const gasOpts = { gasLimit: 200_000, maxFeePerGas: ethers.parseUnits('50', 'gwei'), maxPriorityFeePerGas: ethers.parseUnits('10', 'gwei') };
+      const tx0 = await oracleMgr.updatePrice(TOKEN0, PRICE_1E18, PRICE_1E18, gasOpts);
+      await tx0.wait();
+      const tx1 = await oracleMgr.updatePrice(TOKEN1, PRICE_1E18, PRICE_1E18, gasOpts);
+      await tx1.wait();
+      console.log('[Automation] Oracle prices refreshed');
+    } catch (e) {
+      console.warn('[Automation] Oracle price refresh failed:', e);
+    }
+  }
+
   // 1. Fetch pool analytics from API
   let analytics: PoolAnalytics | null = null;
   try {
@@ -226,11 +247,20 @@ async function tick(riskMgr: ethers.Contract, db: PgPool): Promise<void> {
 
   console.log(`[Automation] Mode change: ${lastOnChainMode} → ${newMode}`);
   const modeUint = RISK_MODE_TO_UINT[newMode] ?? 0;
-  const tx = await riskMgr.setRiskMode(modeUint, Math.round(riskScore), { gasLimit: 200_000 });
-  console.log(`[Automation] Tx: ${tx.hash}`);
-  const receipt = await tx.wait();
-  console.log(`[Automation] Confirmed block ${receipt.blockNumber}`);
-  lastOnChainMode = newMode;
+  try {
+    const tx = await riskMgr.setRiskMode(modeUint, Math.round(riskScore), {
+      gasLimit: 300_000,
+      maxFeePerGas: ethers.parseUnits('5', 'gwei'),
+      maxPriorityFeePerGas: ethers.parseUnits('2', 'gwei'),
+    });
+    console.log(`[Automation] Tx: ${tx.hash}`);
+    const receipt = await tx.wait();
+    console.log(`[Automation] Confirmed block ${receipt.blockNumber}`);
+    lastOnChainMode = newMode;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`[Automation] setRiskMode failed (will retry next tick): ${msg.slice(0, 120)}`);
+  }
 }
 
 function sleep(ms: number) {
