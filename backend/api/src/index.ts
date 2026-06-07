@@ -137,6 +137,7 @@ app.get('/api/lp/:address/history', async (req: Request, res: Response) => {
 
   const result = await db.query(
     `SELECT
+       id,
        pool_id,
        deposit_value_usd,
        withdrawal_value_usd,

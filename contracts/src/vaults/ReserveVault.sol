@@ -19,14 +19,14 @@ contract ReserveVault is IReserveVault, Ownable, ReentrancyGuard {
 
     // ─── Constants ─────────────────────────────────────────────────────────────
 
-    /// @notice Minimum LP deposit duration before compensation is eligible (1 day)
-    uint256 public constant MIN_DEPOSIT_DURATION = 1 days;
+    /// @notice Minimum LP deposit duration before compensation is eligible (5 min for testnet)
+    uint256 public constant MIN_DEPOSIT_DURATION = 5 minutes;
 
     /// @notice Maximum single payout as a fraction of reserve (5% = 500 bps)
     uint256 public constant MAX_SINGLE_PAYOUT_BPS = 500;
 
-    /// @notice Cooldown between claims per LP (6 hours)
-    uint256 public constant CLAIM_COOLDOWN = 6 hours;
+    /// @notice Cooldown between claims per LP (5 min for testnet)
+    uint256 public constant CLAIM_COOLDOWN = 5 minutes;
 
     uint256 private constant BPS = 10_000;
 

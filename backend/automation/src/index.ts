@@ -118,17 +118,35 @@ async function main() {
 // ─── Tick ─────────────────────────────────────────────────────────────────────
 
 async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null, db: PgPool): Promise<void> {
-  // 0. Refresh oracle prices so the hook can record LP positions (sequential to avoid nonce collision)
+  // 0. Refresh oracle prices so the hook can record LP positions
   if (oracleMgr && TOKEN0 && TOKEN1) {
     try {
-      const gasOpts = { gasLimit: 200_000, maxFeePerGas: ethers.parseUnits('50', 'gwei'), maxPriorityFeePerGas: ethers.parseUnits('10', 'gwei') };
-      const tx0 = await oracleMgr.updatePrice(TOKEN0, PRICE_1E18, PRICE_1E18, gasOpts);
-      await tx0.wait();
-      const tx1 = await oracleMgr.updatePrice(TOKEN1, PRICE_1E18, PRICE_1E18, gasOpts);
-      await tx1.wait();
-      console.log('[Automation] Oracle prices refreshed');
-    } catch (e) {
-      console.warn('[Automation] Oracle price refresh failed:', e);
+      // Only send TXs for tokens whose price is actually stale
+      const [fresh0, fresh1]: [boolean, boolean] = await Promise.all([
+        oracleMgr.isPriceFresh(TOKEN0).catch(() => false),
+        oracleMgr.isPriceFresh(TOKEN1).catch(() => false),
+      ]);
+
+      if (!fresh0 || !fresh1) {
+        // Fetch confirmed nonce to avoid colliding with any mempool remnants
+        const nonce = await oracleMgr.runner!.provider!.getTransactionCount(
+          await (oracleMgr.runner as ethers.Wallet).getAddress(), 'latest'
+        );
+        const gasOpts = { gasLimit: 100_000, maxFeePerGas: ethers.parseUnits('25', 'gwei'), maxPriorityFeePerGas: ethers.parseUnits('6', 'gwei') };
+        let n = nonce;
+        if (!fresh0) {
+          const tx = await oracleMgr.updatePrice(TOKEN0, PRICE_1E18, PRICE_1E18, { ...gasOpts, nonce: n++ });
+          await Promise.race([tx.wait(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 30_000))]);
+        }
+        if (!fresh1) {
+          const tx = await oracleMgr.updatePrice(TOKEN1, PRICE_1E18, PRICE_1E18, { ...gasOpts, nonce: n });
+          await Promise.race([tx.wait(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 30_000))]);
+        }
+        console.log('[Automation] Oracle prices refreshed');
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn('[Automation] Oracle price refresh failed:', msg.slice(0, 120));
     }
   }
 
@@ -254,8 +272,14 @@ async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null,
       maxPriorityFeePerGas: ethers.parseUnits('2', 'gwei'),
     });
     console.log(`[Automation] Tx: ${tx.hash}`);
-    const receipt = await tx.wait();
-    console.log(`[Automation] Confirmed block ${receipt.blockNumber}`);
+    // 30-second timeout — a dropped TX must not block the tick loop
+    const receipt = await Promise.race([
+      tx.wait(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('tx.wait() timed out after 30s')), 30_000)
+      ),
+    ]);
+    console.log(`[Automation] Confirmed block ${(receipt as Awaited<ReturnType<typeof tx.wait>>)!.blockNumber}`);
     lastOnChainMode = newMode;
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -266,6 +290,15 @@ async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null,
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// Prevent ECONNRESET / socket hang-up from killing the process — the tick
+// loop already has try/catch; these are stray async network errors.
+process.on('uncaughtException', (err) => {
+  console.warn('[Automation] Uncaught exception (continuing):', (err as Error).message?.slice(0, 120));
+});
+process.on('unhandledRejection', (reason) => {
+  console.warn('[Automation] Unhandled rejection (continuing):', String(reason).slice(0, 120));
+});
 
 main().catch(err => {
   console.error('[Automation] Fatal:', err);

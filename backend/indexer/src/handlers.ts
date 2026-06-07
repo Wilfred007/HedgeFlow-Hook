@@ -128,11 +128,14 @@ export async function handleLiquidityRemoved(
        compensation_paid_usd = $4,
        withdrawal_timestamp  = $5,
        tx_hash_withdrawal    = $6
-     WHERE user_address = $7
-       AND pool_id = $8
-       AND withdrawal_timestamp IS NULL
-     ORDER BY deposit_timestamp DESC
-     LIMIT 1`,
+     WHERE id = (
+       SELECT id FROM lp_positions
+       WHERE LOWER(user_address) = LOWER($7)
+         AND pool_id = $8
+         AND withdrawal_timestamp IS NULL
+       ORDER BY deposit_timestamp DESC
+       LIMIT 1
+     )`,
     [
       ethers.formatUnits(withdrawAmount0, 18),
       ethers.formatUnits(withdrawAmount1, 18),

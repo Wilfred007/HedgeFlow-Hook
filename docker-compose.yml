@@ -71,6 +71,7 @@ services:
     build:
       context: ./backend
       dockerfile: automation/Dockerfile
+    restart: always
     environment:
       - RPC_URL=${RPC_URL}
       - RISK_MANAGER=${RISK_MANAGER}

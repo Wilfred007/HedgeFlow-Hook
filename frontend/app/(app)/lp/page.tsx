@@ -223,8 +223,8 @@ export default function LPPage() {
                 </tr>
               </thead>
               <tbody>
-                {closedPositions.map(pos => (
-                  <tr key={pos.id}>
+                {closedPositions.map((pos, i) => (
+                  <tr key={pos.id ?? i}>
                     <td style={{ textAlign: 'left' }}>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: '#a855f7' }}>
                         {shortAddr(pos.pool_id)}
