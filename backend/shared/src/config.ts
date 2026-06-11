@@ -34,6 +34,7 @@ export const config = {
   riskEngineUrl:       optional('RISK_ENGINE_URL', 'http://localhost:8000'),
 
   // ── Automation ──────────────────────────────────────────────────────────────
+  deployerPrivateKey:   optional('DEPLOYER_PRIVATE_KEY', ''),
   automationPrivateKey: optional('AUTOMATION_PRIVATE_KEY', ''),
   automationInterval:   parseInt(optional('AUTOMATION_INTERVAL_MS', '60000')), // 1 min
 

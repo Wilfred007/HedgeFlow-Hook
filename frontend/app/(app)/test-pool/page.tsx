@@ -4,14 +4,15 @@ import { useState, useEffect } from 'react';
 import {
   useAccount, useChainId, useSwitchChain,
   useReadContracts, useWriteContract, useWaitForTransactionReceipt,
+  usePublicClient,
 } from 'wagmi';
 import { usePrivy } from '@privy-io/react-auth';
 import { parseUnits, formatUnits, maxUint256 } from 'viem';
 import {
   TOKEN0, TOKEN0_SYMBOL, TOKEN1, TOKEN1_SYMBOL,
-  TEST_ROUTER, HEDGEFLOW_HOOK,
+  TEST_ROUTER, HEDGEFLOW_HOOK, ORACLE_MANAGER,
   DYNAMIC_FEE_FLAG, TICK_SPACING, TICK_LOWER, TICK_UPPER,
-  ERC20_ABI, TEST_ROUTER_ABI,
+  ERC20_ABI, TEST_ROUTER_ABI, ORACLE_MANAGER_ABI,
 } from '@/lib/contracts';
 
 const UNICHAIN_SEPOLIA = 1301;
@@ -27,7 +28,7 @@ const POOL_KEY = {
   hooks:       HEDGEFLOW_HOOK,
 } as const;
 
-type OpKey = 'mint0' | 'mint1' | 'approve0' | 'approve1' | 'add' | 'remove' | 'swap';
+type OpKey = 'mint0' | 'mint1' | 'approve0' | 'approve1' | 'add' | 'remove' | 'swap' | 'setPrice';
 
 function fmt(val: bigint | undefined) {
   if (val === undefined) return '…';
@@ -147,6 +148,8 @@ export default function TestPoolPage() {
   const [removeAmt, setRemoveAmt] = useState('100');
   const [swapAmt,   setSwapAmt]   = useState('100');
   const [swapDir,   setSwapDir]   = useState<'0for1' | '1for0'>('0for1');
+  const [price0,    setPrice0]    = useState('1');
+  const [price1,    setPrice1]    = useState('1');
 
   // ── Reads ────────────────────────────────────────────────────────────────────
   const { data: reads, refetch } = useReadContracts({
@@ -155,6 +158,8 @@ export default function TestPoolPage() {
       { address: TOKEN1, abi: ERC20_ABI, functionName: 'balanceOf', args: [address] },
       { address: TOKEN0, abi: ERC20_ABI, functionName: 'allowance', args: [address, TEST_ROUTER] },
       { address: TOKEN1, abi: ERC20_ABI, functionName: 'allowance', args: [address, TEST_ROUTER] },
+      { address: ORACLE_MANAGER, abi: ORACLE_MANAGER_ABI, functionName: 'getPriceWithTimestamp', args: [TOKEN0] },
+      { address: ORACLE_MANAGER, abi: ORACLE_MANAGER_ABI, functionName: 'getPriceWithTimestamp', args: [TOKEN1] },
     ] : [],
     query: { enabled: !!address && chainId === UNICHAIN_SEPOLIA },
   });
@@ -163,8 +168,11 @@ export default function TestPoolPage() {
   const token1Balance   = reads?.[1]?.result as bigint | undefined;
   const token0Allowance = reads?.[2]?.result as bigint | undefined;
   const token1Allowance = reads?.[3]?.result as bigint | undefined;
+  const oraclePrice0    = (reads?.[4]?.result as [bigint, bigint] | undefined)?.[0];
+  const oraclePrice1    = (reads?.[5]?.result as [bigint, bigint] | undefined)?.[0];
 
   // ── Writes ───────────────────────────────────────────────────────────────────
+  const publicClient = usePublicClient();
   const { writeContract, isPending: isWritePending, reset: resetWrite } = useWriteContract();
   const { isLoading: isConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
@@ -174,6 +182,29 @@ export default function TestPoolPage() {
   useEffect(() => {
     if (isTxSuccess) { refetch(); setPendingOp(null); }
   }, [isTxSuccess, refetch]);
+
+  async function handleSetPrices() {
+    setPendingOp('setPrice');
+    setTxError(null);
+    setTxHash(undefined);
+    try {
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}/api/oracle/set-prices`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ price0: Number(price0), price1: Number(price1) }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Failed to set prices');
+      refetch();
+    } catch (e: unknown) {
+      setTxError((e as Error).message ?? String(e));
+    } finally {
+      setPendingOp(null);
+    }
+  }
 
   function exec(op: OpKey, addr: `0x${string}`, abi: unknown, fn: string, args: unknown[]) {
     setPendingOp(op);
@@ -416,6 +447,56 @@ export default function TestPoolPage() {
         </div>
       </div>
 
+      {/* Price Simulator */}
+      <div className="glass-card" style={{ borderRadius: '14px', padding: '22px 24px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '2px', background: 'linear-gradient(90deg, transparent, #f43f5e, transparent)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600 }}>Price Simulator</h2>
+          <span style={{ padding: '2px 8px', background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', borderRadius: '999px', fontSize: '0.65rem', fontWeight: 700, color: '#fb7185', letterSpacing: '0.07em' }}>OWNER ONLY</span>
+        </div>
+        <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginBottom: '18px' }}>
+          Simulate a price move to generate IL on your position. Price changes are queued and applied by the automation service within ~60 seconds. Then wait 5 min and remove liquidity to see compensation paid.
+        </p>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+          {[
+            { symbol: TOKEN0_SYMBOL, token: TOKEN0, value: price0, onChange: setPrice0, current: oraclePrice0 },
+            { symbol: TOKEN1_SYMBOL, token: TOKEN1, value: price1, onChange: setPrice1, current: oraclePrice1 },
+          ].map(({ symbol, current, value, onChange }) => (
+            <div key={symbol}>
+              <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                {symbol} price (USD)
+              </label>
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', fontSize: '0.85rem' }}>$</span>
+                <input
+                  type="number" min="0.01" step="0.01" value={value} onChange={e => onChange(e.target.value)}
+                  style={{ width: '100%', padding: '10px 12px 10px 24px', borderRadius: '8px', background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.875rem', outline: 'none', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                On-chain: <span style={{ color: '#c084fc', fontFamily: 'var(--font-mono)' }}>
+                  {current !== undefined ? `$${Number(formatUnits(current, 18)).toFixed(2)}` : '…'}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <button
+          onClick={handleSetPrices}
+          disabled={opBusy('setPrice') || !price0 || !price1 || Number(price0) <= 0 || Number(price1) <= 0}
+          style={{
+            padding: '10px 24px', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600,
+            background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)',
+            color: '#fb7185', cursor: opBusy('setPrice') ? 'not-allowed' : 'pointer',
+            opacity: opBusy('setPrice') ? 0.5 : 1, whiteSpace: 'nowrap',
+          }}
+        >
+          {opBusy('setPrice') ? 'Setting Prices…' : 'Set Oracle Prices'}
+        </button>
+      </div>
+
       {/* Guide */}
       <div className="glass-card" style={{ borderRadius: '14px', padding: '22px 24px' }}>
         <h2 style={{ fontSize: '0.875rem', fontWeight: 600, marginBottom: '14px' }}>Quick Start</h2>
@@ -423,8 +504,9 @@ export default function TestPoolPage() {
           <li>Mint 1,000 {TOKEN0_SYMBOL} and 1,000 {TOKEN1_SYMBOL} — each is a separate tx.</li>
           <li>Approve the TestRouter for both tokens — each is a separate tx.</li>
           <li>Enter a liquidity amount (e.g. <code style={{ fontFamily: 'var(--font-mono)', background: 'rgba(124,58,237,0.1)', padding: '1px 5px', borderRadius: '4px' }}>1000</code>) and click <strong>Add Liquidity</strong>.</li>
-          <li>Once confirmed, your position appears on the <strong>Positions</strong> page when the indexer picks it up.</li>
-          <li>To exit, enter the same amount and click <strong>Remove Liquidity</strong>.</li>
+          <li>Once confirmed, your position appears on the <strong>Positions</strong> page.</li>
+          <li>Use <strong>Price Simulator</strong> to move {TOKEN0_SYMBOL} price (e.g. $2.00) — this creates IL on your position.</li>
+          <li>Wait 5 minutes, then click <strong>Remove Liquidity</strong> to trigger IL compensation payout.</li>
         </ol>
       </div>
 

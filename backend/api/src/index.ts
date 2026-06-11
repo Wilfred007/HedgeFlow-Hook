@@ -223,6 +223,44 @@ app.get('/api/risk/current', async (_req: Request, res: Response) => {
   res.json(result.rows[0]);
 });
 
+// ─── Oracle price simulator ───────────────────────────────────────────────────
+
+app.post('/api/oracle/set-prices', async (req: Request, res: Response) => {
+  const { price0, price1 } = req.body as { price0?: number; price1?: number };
+
+  if ((price0 !== undefined && (typeof price0 !== 'number' || price0 <= 0)) ||
+      (price1 !== undefined && (typeof price1 !== 'number' || price1 <= 0))) {
+    return res.status(400).json({ error: 'price0 and price1 must be positive numbers' });
+  }
+  if (price0 === undefined && price1 === undefined) {
+    return res.status(400).json({ error: 'provide at least one of price0 or price1' });
+  }
+  const token0 = process.env.NEXT_PUBLIC_TOKEN0 ?? process.env.TOKEN0 ?? '';
+  const token1 = process.env.NEXT_PUBLIC_TOKEN1 ?? process.env.TOKEN1 ?? '';
+
+  try {
+    if (price0 !== undefined && token0) {
+      await db.query(
+        `INSERT INTO indexer_state (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = $2`,
+        [`oracle_price_${token0.toLowerCase()}`, price0.toString()]
+      );
+    }
+    if (price1 !== undefined && token1) {
+      await db.query(
+        `INSERT INTO indexer_state (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = $2`,
+        [`oracle_price_${token1.toLowerCase()}`, price1.toString()]
+      );
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: msg });
+  }
+
+  res.json({ success: true, queued: true });
+});
+
 // ─── Error handler ────────────────────────────────────────────────────────────
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

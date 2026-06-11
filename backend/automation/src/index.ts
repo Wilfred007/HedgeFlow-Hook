@@ -45,7 +45,6 @@ const API_URL   = process.env.API_URL        ?? 'http://localhost:3001';
 const POOL_ID   = process.env.DEMO_POOL_ID   ?? '';
 const TOKEN0    = process.env.TOKEN0         ?? '';
 const TOKEN1    = process.env.TOKEN1         ?? '';
-// Fixed 1 USD price in 18-decimal wei — sufficient for testnet oracle
 const PRICE_1E18 = ethers.parseUnits('1', 18);
 
 const RISK_MODE_TO_UINT: Record<string, number> = {
@@ -54,6 +53,26 @@ const RISK_MODE_TO_UINT: Record<string, number> = {
 const UINT_TO_MODE: Record<number, string> = {
   0: 'NORMAL', 1: 'ELEVATED', 2: 'DEFENSIVE', 3: 'CRISIS',
 };
+
+// ─── Nonce tracker ────────────────────────────────────────────────────────────
+
+class NonceTracker {
+  private nonce: number | null = null;
+
+  constructor(
+    private provider: ethers.Provider,
+    private address: string,
+  ) {}
+
+  async next(): Promise<number> {
+    if (this.nonce === null) {
+      this.nonce = await this.provider.getTransactionCount(this.address, 'latest');
+    }
+    return this.nonce++;
+  }
+
+  reset() { this.nonce = null; }
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -91,6 +110,8 @@ async function main() {
 
   console.log(`[Automation] Wallet: ${wallet.address}`);
 
+  const nonceTracker = new NonceTracker(provider, wallet.address);
+
   try {
     const mode = await riskMgr.getMode();
     lastOnChainMode = UINT_TO_MODE[Number(mode)] ?? 'NORMAL';
@@ -101,7 +122,7 @@ async function main() {
 
   while (true) {
     try {
-      await tick(riskMgr, oracleMgr, db);
+      await tick(riskMgr, oracleMgr, db, nonceTracker);
       consecutiveErrors = 0;
     } catch (err) {
       consecutiveErrors++;
@@ -117,32 +138,80 @@ async function main() {
 
 // ─── Tick ─────────────────────────────────────────────────────────────────────
 
-async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null, db: PgPool): Promise<void> {
-  // 0. Refresh oracle prices so the hook can record LP positions
+async function sendTx(
+  label: string,
+  txFn: (nonce: number, gasOverride?: object) => Promise<ethers.TransactionResponse>,
+  tracker: NonceTracker,
+): Promise<boolean> {
+  const nonce = await tracker.next();
+  try {
+    const tx = await txFn(nonce);
+    console.log(`[Automation] ${label} submitted: ${tx.hash} (nonce ${nonce})`);
+    tx.wait().catch((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[Automation] ${label} wait failed: ${msg.slice(0, 100)}`);
+      tracker.reset();
+    });
+    return true;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+
+    if (msg.includes('txpool is full') || msg.includes('too many requests')) {
+      // Network congestion — keep our nonce position, retry next tick
+      console.warn(`[Automation] ${label}: txpool full, will retry next tick`);
+      return false;
+    }
+
+    const stuckAtNonce = msg.includes('already known')
+      || msg.includes('replacement fee too low')
+      || msg.includes('replacement transaction underpriced');
+    if (stuckAtNonce) {
+      // Pending tx at this nonce — replace with higher fee to unstick it
+      console.warn(`[Automation] ${label}: stuck at nonce ${nonce}, attempting replacement with higher fee`);
+      try {
+        const bump = { maxFeePerGas: ethers.parseUnits('50', 'gwei'), maxPriorityFeePerGas: ethers.parseUnits('25', 'gwei') };
+        const tx2 = await txFn(nonce, bump);
+        console.log(`[Automation] ${label} replacement submitted: ${tx2.hash}`);
+        tx2.wait().catch(() => { tracker.reset(); });
+        return true;
+      } catch (e2: unknown) {
+        const msg2 = e2 instanceof Error ? e2.message : String(e2);
+        console.warn(`[Automation] ${label}: replacement also failed: ${msg2.slice(0, 100)}`);
+        return false;
+      }
+    }
+
+    if (msg.includes('nonce too low') || msg.includes('NONCE_EXPIRED')) {
+      tracker.reset();
+    }
+    throw e;
+  }
+}
+
+async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null, db: PgPool, tracker: NonceTracker): Promise<void> {
+  // 0. Refresh oracle prices — use DB overrides if set, otherwise keep at $1
   if (oracleMgr && TOKEN0 && TOKEN1) {
     try {
-      // Only send TXs for tokens whose price is actually stale
-      const [fresh0, fresh1]: [boolean, boolean] = await Promise.all([
+      const [fresh0, fresh1, row0, row1]: [boolean, boolean, { rows: {value:string}[] }, { rows: {value:string}[] }] = await Promise.all([
         oracleMgr.isPriceFresh(TOKEN0).catch(() => false),
         oracleMgr.isPriceFresh(TOKEN1).catch(() => false),
+        db.query(`SELECT value FROM indexer_state WHERE key = $1`, [`oracle_price_${TOKEN0.toLowerCase()}`]),
+        db.query(`SELECT value FROM indexer_state WHERE key = $1`, [`oracle_price_${TOKEN1.toLowerCase()}`]),
       ]);
 
-      if (!fresh0 || !fresh1) {
-        // Fetch confirmed nonce to avoid colliding with any mempool remnants
-        const nonce = await oracleMgr.runner!.provider!.getTransactionCount(
-          await (oracleMgr.runner as ethers.Wallet).getAddress(), 'latest'
-        );
-        const gasOpts = { gasLimit: 100_000, maxFeePerGas: ethers.parseUnits('25', 'gwei'), maxPriorityFeePerGas: ethers.parseUnits('6', 'gwei') };
-        let n = nonce;
-        if (!fresh0) {
-          const tx = await oracleMgr.updatePrice(TOKEN0, PRICE_1E18, PRICE_1E18, { ...gasOpts, nonce: n++ });
-          await Promise.race([tx.wait(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 30_000))]);
-        }
-        if (!fresh1) {
-          const tx = await oracleMgr.updatePrice(TOKEN1, PRICE_1E18, PRICE_1E18, { ...gasOpts, nonce: n });
-          await Promise.race([tx.wait(), new Promise<never>((_, r) => setTimeout(() => r(new Error('timeout')), 30_000))]);
-        }
-        console.log('[Automation] Oracle prices refreshed');
+      const price0 = row0.rows[0] ? ethers.parseUnits(row0.rows[0].value, 18) : PRICE_1E18;
+      const price1 = row1.rows[0] ? ethers.parseUnits(row1.rows[0].value, 18) : PRICE_1E18;
+      const needsUpdate0 = !fresh0 || row0.rows[0] != null;
+      const needsUpdate1 = !fresh1 || row1.rows[0] != null;
+
+      if (needsUpdate0) {
+        await sendTx('oracle token0', (n, g) => oracleMgr.updatePrice(TOKEN0, price0, price0, { nonce: n, ...g }), tracker);
+      }
+      if (needsUpdate1) {
+        await sendTx('oracle token1', (n, g) => oracleMgr.updatePrice(TOKEN1, price1, price1, { nonce: n, ...g }), tracker);
+      }
+      if (needsUpdate0 || needsUpdate1) {
+        console.log(`[Automation] Oracle prices — token0: $${row0.rows[0]?.value ?? '1'}, token1: $${row1.rows[0]?.value ?? '1'}`);
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -266,21 +335,15 @@ async function tick(riskMgr: ethers.Contract, oracleMgr: ethers.Contract | null,
   console.log(`[Automation] Mode change: ${lastOnChainMode} → ${newMode}`);
   const modeUint = RISK_MODE_TO_UINT[newMode] ?? 0;
   try {
-    const tx = await riskMgr.setRiskMode(modeUint, Math.round(riskScore), {
-      gasLimit: 300_000,
-      maxFeePerGas: ethers.parseUnits('5', 'gwei'),
-      maxPriorityFeePerGas: ethers.parseUnits('2', 'gwei'),
-    });
-    console.log(`[Automation] Tx: ${tx.hash}`);
-    // 30-second timeout — a dropped TX must not block the tick loop
-    const receipt = await Promise.race([
-      tx.wait(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('tx.wait() timed out after 30s')), 30_000)
-      ),
-    ]);
-    console.log(`[Automation] Confirmed block ${(receipt as Awaited<ReturnType<typeof tx.wait>>)!.blockNumber}`);
-    lastOnChainMode = newMode;
+    const ok = await sendTx(
+      'setRiskMode',
+      (n, g) => riskMgr.setRiskMode(modeUint, Math.round(riskScore), { nonce: n, ...g }),
+      tracker,
+    );
+    if (ok) {
+      console.log(`[Automation] Risk mode set to ${newMode}`);
+      lastOnChainMode = newMode;
+    }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.warn(`[Automation] setRiskMode failed (will retry next tick): ${msg.slice(0, 120)}`);

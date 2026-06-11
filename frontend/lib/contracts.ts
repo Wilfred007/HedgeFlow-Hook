@@ -5,7 +5,8 @@ export const TOKEN1        = (process.env.NEXT_PUBLIC_TOKEN1        ?? '0x') as 
 export const TOKEN1_SYMBOL =  process.env.NEXT_PUBLIC_TOKEN1_SYMBOL ?? 'TOKEN1';
 export const TEST_ROUTER   = (process.env.NEXT_PUBLIC_TEST_ROUTER   ?? '0x') as `0x${string}`;
 export const POOL_MANAGER  = (process.env.NEXT_PUBLIC_POOL_MANAGER  ?? '0x') as `0x${string}`;
-export const HEDGEFLOW_HOOK = (process.env.NEXT_PUBLIC_HEDGEFLOW_HOOK ?? '0x') as `0x${string}`;
+export const HEDGEFLOW_HOOK    = (process.env.NEXT_PUBLIC_HEDGEFLOW_HOOK    ?? '0x') as `0x${string}`;
+export const ORACLE_MANAGER    = (process.env.NEXT_PUBLIC_ORACLE_MANAGER    ?? '0x') as `0x${string}`;
 
 // Pool parameters
 export const DYNAMIC_FEE_FLAG = 8388608; // 0x800000
@@ -57,6 +58,34 @@ const LP_PARAMS_COMPONENTS = [
   { name: 'tickUpper',      type: 'int24'   },
   { name: 'liquidityDelta', type: 'int256'  },
   { name: 'salt',           type: 'bytes32' },
+] as const;
+
+export const ORACLE_MANAGER_ABI = [
+  {
+    name: 'updatePrice',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'token',          type: 'address' },
+      { name: 'primaryPrice',   type: 'uint256' },
+      { name: 'secondaryPrice', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'getPriceWithTimestamp',
+    type: 'function',
+    stateMutability: 'view',
+    inputs:  [{ name: 'token', type: 'address' }],
+    outputs: [{ name: 'price', type: 'uint256' }, { name: 'updatedAt', type: 'uint256' }],
+  },
+  {
+    name: 'isPriceFresh',
+    type: 'function',
+    stateMutability: 'view',
+    inputs:  [{ name: 'token', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
 ] as const;
 
 export const TEST_ROUTER_ABI = [

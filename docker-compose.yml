@@ -95,6 +95,8 @@ services:
       dockerfile: api/Dockerfile
     ports:
       - "3001:3001"
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=postgresql://hedgeflow:hedgeflow@postgres:5432/hedgeflow
       - API_PORT=3001
