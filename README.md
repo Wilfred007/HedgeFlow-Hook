@@ -2,6 +2,8 @@
 
 **Adaptive liquidity protection for Uniswap v4 — powered by dynamic fees, reserve-backed IL compensation, and an AI risk engine.**
 
+🌐 **Live Demo:** [https://hedge-flow-hook.vercel.app/](https://hedge-flow-hook.vercel.app/)
+
 HedgeFlow is a Uniswap v4 hook protocol that protects liquidity providers from impermanent loss. It continuously monitors on-chain conditions, classifies risk into one of four modes, adjusts trading fees dynamically, and compensates LPs from a shared reserve vault when they suffer losses. An AI layer (Groq LLM) blends real-time market sentiment into the risk score, and Reactive Network automation keeps the on-chain risk mode in sync with off-chain analysis.
 
 ---
