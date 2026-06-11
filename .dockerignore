@@ -1,0 +1,38 @@
+# Node
+node_modules/
+npm-debug.log
+.npm
+
+# Next.js
+.next/
+out/
+
+# Foundry
+contracts/lib/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+
+# Env files
+.env
+.env.local
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# Misc
+*.log
+.DS_Store
+*.pem
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# Backend
+backend/node_modules/
+backend/**/node_modules/
