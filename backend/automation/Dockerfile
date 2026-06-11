@@ -31,5 +31,6 @@ COPY --from=builder /app/automation/dist ./automation/dist
 COPY --from=builder /app/package.json .
 
 ENV NODE_ENV=production
+EXPOSE 3003
 
 CMD ["node", "automation/dist/index.js"]

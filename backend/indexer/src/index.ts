@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import express from 'express';
 import { config, HEDGEFLOW_HOOK_ABI, RISK_MANAGER_ABI, RESERVE_VAULT_ABI } from '@hedgeflow/shared';
 import {
   db,
@@ -16,11 +17,38 @@ import {
 
 const POLL_INTERVAL_MS = 5_000;
 const BLOCK_BATCH_SIZE = 500;
+const PORT = process.env.PORT || 3002;
 
 async function main() {
   console.log('[Indexer] Starting HedgeFlow indexer...');
   console.log(`[Indexer] RPC: ${config.rpcUrl}`);
   console.log(`[Indexer] Hook: ${config.hedgeflowHook}`);
+
+  // ── Health check server for Render ──────────────────────────────────────────
+  const app = express();
+  let currentBlock = 0;
+  let isHealthy = false;
+
+  app.get('/health', (req, res) => {
+    res.json({
+      status: isHealthy ? 'ok' : 'starting',
+      service: 'indexer',
+      currentBlock,
+      lastCheck: new Date().toISOString()
+    });
+  });
+
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'HedgeFlow Indexer',
+      status: isHealthy ? 'running' : 'starting',
+      currentBlock
+    });
+  });
+
+  app.listen(PORT, () => {
+    console.log(`[Indexer] Health server running on port ${PORT}`);
+  });
 
   // ── DB setup ────────────────────────────────────────────────────────────────
   await runMigrations();
@@ -78,10 +106,12 @@ async function main() {
   }
 
   console.log(`[Indexer] Starting from block ${lastBlock + 1}`);
+  isHealthy = true;
 
   while (true) {
     try {
       const latestBlock = await provider.getBlockNumber();
+      currentBlock = latestBlock;
 
       if (lastBlock >= latestBlock) {
         await sleep(POLL_INTERVAL_MS);

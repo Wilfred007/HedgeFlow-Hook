@@ -9,6 +9,7 @@
  */
 
 import axios from 'axios';
+import express from 'express';
 import { ethers } from 'ethers';
 import { Pool as PgPool } from 'pg';
 import { config, RISK_MANAGER_ABI, ORACLE_MANAGER_ABI } from '@hedgeflow/shared';
@@ -46,6 +47,7 @@ const POOL_ID   = process.env.DEMO_POOL_ID   ?? '';
 const TOKEN0    = process.env.TOKEN0         ?? '';
 const TOKEN1    = process.env.TOKEN1         ?? '';
 const PRICE_1E18 = ethers.parseUnits('1', 18);
+const PORT      = process.env.PORT           ?? 3003;
 
 const RISK_MODE_TO_UINT: Record<string, number> = {
   NORMAL: 0, ELEVATED: 1, DEFENSIVE: 2, CRISIS: 3,
@@ -79,6 +81,8 @@ class NonceTracker {
 let lastOnChainMode: string | null = null;
 let consecutiveErrors = 0;
 const MAX_ERRORS = 20;
+let lastTickTime = Date.now();
+let tickCount = 0;
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -89,6 +93,35 @@ async function main() {
   console.log(`[Automation] Pool ID     : ${POOL_ID}`);
   console.log(`[Automation] RiskManager : ${config.riskManager}`);
   console.log(`[Automation] Interval    : ${config.automationInterval}ms`);
+
+  // ── Health check server for Render ──────────────────────────────────────────
+  const app = express();
+
+  app.get('/health', (req, res) => {
+    const secondsSinceLastTick = Math.floor((Date.now() - lastTickTime) / 1000);
+    res.json({
+      status: consecutiveErrors < 5 ? 'ok' : 'degraded',
+      service: 'automation',
+      lastMode: lastOnChainMode,
+      tickCount,
+      lastTickSeconds: secondsSinceLastTick,
+      consecutiveErrors,
+      lastCheck: new Date().toISOString()
+    });
+  });
+
+  app.get('/', (req, res) => {
+    res.json({
+      service: 'HedgeFlow Automation',
+      status: consecutiveErrors < 5 ? 'running' : 'degraded',
+      currentMode: lastOnChainMode,
+      ticks: tickCount
+    });
+  });
+
+  app.listen(PORT, () => {
+    console.log(`[Automation] Health server running on port ${PORT}`);
+  });
 
   if (!config.automationPrivateKey) {
     console.error('[Automation] AUTOMATION_PRIVATE_KEY not set — exiting');
@@ -124,6 +157,8 @@ async function main() {
     try {
       await tick(riskMgr, oracleMgr, db, nonceTracker);
       consecutiveErrors = 0;
+      lastTickTime = Date.now();
+      tickCount++;
     } catch (err) {
       consecutiveErrors++;
       console.error(`[Automation] Tick error (${consecutiveErrors}/${MAX_ERRORS}):`, err);

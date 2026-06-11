@@ -1,0 +1,38 @@
+FROM node:22-alpine AS builder
+WORKDIR /build
+
+# Copy backend workspace files
+COPY backend/package.json ./package.json
+COPY backend/shared ./shared
+COPY backend/indexer ./indexer
+
+# Install all dependencies
+RUN npm install --workspaces
+
+# Build shared first, then indexer
+RUN npm run build --workspace=shared
+RUN npm run build --workspace=indexer
+
+# Production stage
+FROM node:22-alpine
+WORKDIR /app
+
+# Copy all node_modules (includes shared dependencies)
+COPY --from=builder /build/node_modules ./node_modules
+
+# Copy shared package
+COPY --from=builder /build/shared/package.json ./shared/package.json
+COPY --from=builder /build/shared/dist ./shared/dist
+
+# Copy indexer package
+COPY --from=builder /build/indexer/package.json ./indexer/package.json
+COPY --from=builder /build/indexer/dist ./indexer/dist
+
+# Copy root package.json for workspace resolution
+COPY --from=builder /build/package.json ./package.json
+
+ENV NODE_ENV=production
+EXPOSE 3002
+
+CMD ["node", "indexer/dist/index.js"]
+

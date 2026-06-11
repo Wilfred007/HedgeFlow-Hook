@@ -31,5 +31,6 @@ COPY --from=builder /app/indexer/dist ./indexer/dist
 COPY --from=builder /app/package.json .
 
 ENV NODE_ENV=production
+EXPOSE 3002
 
 CMD ["node", "indexer/dist/index.js"]
